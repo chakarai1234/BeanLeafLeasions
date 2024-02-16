@@ -1,4 +1,5 @@
 import os
+from re import S
 import torch
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
@@ -12,6 +13,9 @@ from torchinfo import Verbosity, summary
 from datetime import datetime
 from utils import *
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+from torchvision.utils import make_grid
+import shutil
 
 
 def train_validate_test(arguments: ArgumentParser):
@@ -29,13 +33,15 @@ def train_validate_test(arguments: ArgumentParser):
     LOG_SAVE_DIR = args.log_path
     IMG_SAVE_DIR = args.img_path
     MODEL_SAVE_DIR = args.model_path
+    SAVE_MODEL = args.save_model
+    TENSORBOARD_LOGS_DIR = args.tensorboard_logs
     LJUST_VALUES = 20
 
     time_str = datetime.strftime(datetime.now(), '%m%d-%H%M%S')
 
     IMG_SAVE_DIR = IMG_SAVE_DIR+"/train-{:s}".format(time_str)
 
-    torch.manual_seed(seed=42)
+    torch.manual_seed(seed=23)
 
     if not os.path.exists(LOG_SAVE_DIR):
         os.makedirs(LOG_SAVE_DIR)
@@ -43,7 +49,13 @@ def train_validate_test(arguments: ArgumentParser):
     if not os.path.exists(IMG_SAVE_DIR):
         os.makedirs(IMG_SAVE_DIR)
 
-    if not os.path.exists(MODEL_SAVE_DIR):
+    if os.path.exists(TENSORBOARD_LOGS_DIR):
+        shutil.rmtree(TENSORBOARD_LOGS_DIR)
+
+    if not os.path.exists(TENSORBOARD_LOGS_DIR):
+        os.makedirs(TENSORBOARD_LOGS_DIR)
+
+    if not os.path.exists(MODEL_SAVE_DIR) and SAVE_MODEL:
         os.makedirs(MODEL_SAVE_DIR)
 
     logger = get_logger(os.path.join(LOG_SAVE_DIR, 'train-{:s}.log'.format(time_str)))
@@ -107,13 +119,16 @@ def train_validate_test(arguments: ArgumentParser):
     val_losses = []
     last_lrs = []
 
+    writer = SummaryWriter(TENSORBOARD_LOGS_DIR)
+
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0.0
         correct = 0
         total = 0
 
-        for images, labels in train_loader:
+        for i, (images, labels) in enumerate(train_loader):
+
             images, labels = images.to(DEVICE), labels.to(DEVICE)
 
             optimizer.zero_grad()
@@ -160,6 +175,14 @@ def train_validate_test(arguments: ArgumentParser):
         val_losses.append(val_loss)
         last_lrs.append(last_lr)
 
+        grid = make_grid(images)
+        writer.add_image(f'Epoch_{epoch}', grid, epoch * len(train_loader) + i)
+
+        writer.add_scalar('Loss/train', train_loss, epoch)
+        writer.add_scalar('Loss/test', val_loss, epoch)
+        writer.add_scalar('Accuracy/train', train_accuracy, epoch)
+        writer.add_scalar('Accuracy/test', val_accuracy, epoch)
+
         logger.info(
             "{}:\tTrain Accuracy: {}% - Val Accuracy: {}% - Train loss: {} - Val loss: {} - Last LR: {}"
             .format(f"Epoch {epoch+1}".ljust(LJUST_VALUES),
@@ -168,6 +191,8 @@ def train_validate_test(arguments: ArgumentParser):
                     f"{train_loss}",
                     f"{val_loss}",
                     f"{last_lr}"))
+
+    writer.close()
 
     logger.info("{}:\t{}".format("Train Accuracies".ljust(LJUST_VALUES), train_accuracies))
     logger.info("{}:\t{}".format("Val Accuracies".ljust(LJUST_VALUES), val_accuracies))
@@ -222,9 +247,11 @@ def train_validate_test(arguments: ArgumentParser):
 
     logger.info("{}:\t{}".format("Time Difference".ljust(LJUST_VALUES), delta))
 
-    torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
-
-    logger.info("Saving the Model")
+    if SAVE_MODEL:
+        torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
+        logger.info("Saving the Model")
+    else:
+        logger.info("Not saving the Model, Please set the --save-model flag")
 
 
 if __name__ == "__main__":
@@ -250,6 +277,10 @@ if __name__ == "__main__":
     argparser.add_argument("--img-path", type=str, default=os.getcwd()+"/images", help="Image Path")
 
     argparser.add_argument("--model-path", type=str, default=os.getcwd()+"/models", help="Model Path")
+
+    argparser.add_argument("--tensorboard-logs", type=str, default=os.getcwd()+"/tensorboard_logs", help="Tensorboard logs Path")
+
+    argparser.add_argument("--save-model", type=bool, default=False, help="Save Model")
 
     argparser.add_argument("--out-features", type=int, default=3, help="Output Features")
 

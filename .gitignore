@@ -2,6 +2,7 @@ data/
 images/
 logs/
 models/
+tensorboard_logs/
 .vscode/
 .ipynb_checkpoints/
 **/__pycache__/
