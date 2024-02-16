@@ -1,5 +1,4 @@
 import os
-from re import S
 import torch
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
@@ -16,6 +15,7 @@ import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 import shutil
+import numpy as np
 
 
 def train_validate_test(arguments: ArgumentParser):
@@ -41,7 +41,7 @@ def train_validate_test(arguments: ArgumentParser):
 
     IMG_SAVE_DIR = IMG_SAVE_DIR+"/train-{:s}".format(time_str)
 
-    torch.manual_seed(seed=23)
+    torch.manual_seed(seed=42)
 
     if not os.path.exists(LOG_SAVE_DIR):
         os.makedirs(LOG_SAVE_DIR)
@@ -77,10 +77,25 @@ def train_validate_test(arguments: ArgumentParser):
     logger.info("{}:\t{}".format("MEAN".ljust(LJUST_VALUES), MEAN))
     logger.info("{}:\t{}".format("STD".ljust(LJUST_VALUES), STD))
 
+    random_numbers = np.random.rand(4)
+
+    scaled_numbers = random_numbers / np.sum(random_numbers) * 0.5
+
+    BRIGHTNESS, CONTRAST, SATURATION, HUE = scaled_numbers
+
+    BRIGHTNESS = round(BRIGHTNESS, 2)
+    CONTRAST = round(CONTRAST, 2)
+    SATURATION = round(SATURATION, 2)
+    HUE = round(HUE, 2)
+
+    logger.info("{}:\t{}".format("BRIGHTNESS".ljust(LJUST_VALUES), BRIGHTNESS))
+    logger.info("{}:\t{}".format("CONTRAST".ljust(LJUST_VALUES), CONTRAST))
+    logger.info("{}:\t{}".format("SATURATION".ljust(LJUST_VALUES), SATURATION))
+    logger.info("{}:\t{}".format("HUE".ljust(LJUST_VALUES), HUE))
+
     train_transform = transforms.Compose([
         transforms.Resize(RESIZE),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-        transforms.CenterCrop([192, 192]),
+        transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(MEAN, STD)
@@ -97,11 +112,15 @@ def train_validate_test(arguments: ArgumentParser):
 
     logger.info("{}:\t{}".format("Classes".ljust(LJUST_VALUES), dataset.class_to_idx))
 
-    train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.7, 0.3))
+    train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.6, 0.4))
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    logger.info("{}:\t{}".format("Train Loader length".ljust(LJUST_VALUES), len(train_loader)))
+    logger.info("{}:\t{}".format("Val Loader length".ljust(LJUST_VALUES), len(val_loader)))
+    logger.info("{}:\t{}".format("Test Loader length".ljust(LJUST_VALUES), len(test_loader)))
 
     model.to(DEVICE)
 
@@ -144,6 +163,10 @@ def train_validate_test(arguments: ArgumentParser):
 
             total_loss += loss.item()
 
+            grid = make_grid(images)
+            writer.add_image(f'Training_Epoch_{epoch+1}', grid, i)
+            writer.close()
+
         correct_val = 0
         total_val = 0
         total_loss_val = 0.0
@@ -151,7 +174,7 @@ def train_validate_test(arguments: ArgumentParser):
         model.eval()
 
         with torch.no_grad():
-            for images, labels in val_loader:
+            for i, (images, labels) in enumerate(val_loader):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
@@ -160,6 +183,10 @@ def train_validate_test(arguments: ArgumentParser):
                 correct_val += (predicted == labels).sum().item()
 
                 total_loss_val += loss.item()
+
+                grid = make_grid(images)
+                writer.add_image(f'Val_Epoch_{epoch+1}', grid, i)
+                writer.close()
 
         scheduler.step()
 
@@ -175,13 +202,13 @@ def train_validate_test(arguments: ArgumentParser):
         val_losses.append(val_loss)
         last_lrs.append(last_lr)
 
-        grid = make_grid(images)
-        writer.add_image(f'Epoch_{epoch}', grid, epoch * len(train_loader) + i)
+        writer.add_scalar('Loss/Train', train_loss, epoch)
+        writer.add_scalar('Loss/Val', val_loss, epoch)
+        writer.add_scalar('Accuracy/Train', train_accuracy, epoch)
+        writer.add_scalar('Accuracy/Val', val_accuracy, epoch)
+        writer.add_scalar('Learning Rate', last_lr, epoch)
 
-        writer.add_scalar('Loss/train', train_loss, epoch)
-        writer.add_scalar('Loss/test', val_loss, epoch)
-        writer.add_scalar('Accuracy/train', train_accuracy, epoch)
-        writer.add_scalar('Accuracy/test', val_accuracy, epoch)
+        writer.close()
 
         logger.info(
             "{}:\tTrain Accuracy: {}% - Val Accuracy: {}% - Train loss: {} - Val loss: {} - Last LR: {}"
@@ -191,8 +218,6 @@ def train_validate_test(arguments: ArgumentParser):
                     f"{train_loss}",
                     f"{val_loss}",
                     f"{last_lr}"))
-
-    writer.close()
 
     logger.info("{}:\t{}".format("Train Accuracies".ljust(LJUST_VALUES), train_accuracies))
     logger.info("{}:\t{}".format("Val Accuracies".ljust(LJUST_VALUES), val_accuracies))
@@ -236,6 +261,10 @@ def train_validate_test(arguments: ArgumentParser):
             correct_test += (predicted == labels).sum().item()
 
             total_loss_test += loss.item()
+
+            grid = make_grid(images)
+            writer.add_image(f'Test_Epoch', grid)
+            writer.close()
 
     logger.info("{}:\t{}".format(f"Test".ljust(LJUST_VALUES), f"Test Accuracy - {100*correct_test/total_test:.2f}% - Test Loss = {total_loss_test/len(test_loader):.3f}"))
 
