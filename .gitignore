@@ -1,4 +1,6 @@
-data/
+data/*
+!data/.gitkeep
+
 images/
 logs/
 models/
@@ -6,3 +8,4 @@ tensorboard_logs/
 .vscode/
 .ipynb_checkpoints/
 **/__pycache__/
+pyrightconfig.json

@@ -12,7 +12,7 @@ from torchinfo import Verbosity, summary
 from datetime import datetime
 from utils import *
 import matplotlib.pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 from torchvision.utils import make_grid
 import shutil
 import numpy as np
@@ -93,12 +93,17 @@ def train_validate_test(arguments: ArgumentParser):
     logger.info("{}:\t{}".format("SATURATION".ljust(LJUST_VALUES), SATURATION))
     logger.info("{}:\t{}".format("HUE".ljust(LJUST_VALUES), HUE))
 
+    # train_transform = transforms.Compose([
+    #     transforms.Resize(RESIZE),
+    #     transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(MEAN, STD)
+    # ])
+
     train_transform = transforms.Compose([
         transforms.Resize(RESIZE),
-        transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(MEAN, STD)
+        transforms.ToTensor()
     ])
 
     test_transform = transforms.Compose([
@@ -138,7 +143,7 @@ def train_validate_test(arguments: ArgumentParser):
     val_losses = []
     last_lrs = []
 
-    writer = SummaryWriter(TENSORBOARD_LOGS_DIR)
+    writer = SummaryWriter(TENSORBOARD_LOGS_DIR, comment="Resnet50")
 
     for epoch in range(EPOCHS):
         model.train()
