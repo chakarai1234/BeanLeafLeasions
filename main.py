@@ -16,6 +16,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from torchvision.utils import make_grid
 import shutil
 import numpy as np
+from pathlib import Path
 
 
 def train_validate_test(arguments: ArgumentParser):
@@ -43,20 +44,12 @@ def train_validate_test(arguments: ArgumentParser):
 
     torch.manual_seed(seed=42)
 
-    if not os.path.exists(LOG_SAVE_DIR):
-        os.makedirs(LOG_SAVE_DIR)
-
-    if not os.path.exists(IMG_SAVE_DIR):
-        os.makedirs(IMG_SAVE_DIR)
-
+    Path(LOG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
+    Path(IMG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
     if os.path.exists(TENSORBOARD_LOGS_DIR):
-        shutil.rmtree(TENSORBOARD_LOGS_DIR)
-
-    if not os.path.exists(TENSORBOARD_LOGS_DIR):
-        os.makedirs(TENSORBOARD_LOGS_DIR)
-
-    if not os.path.exists(MODEL_SAVE_DIR) and SAVE_MODEL:
-        os.makedirs(MODEL_SAVE_DIR)
+        shutil.rmtree(Path(TENSORBOARD_LOGS_DIR))
+    Path(TENSORBOARD_LOGS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(MODEL_SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
     logger = get_logger(os.path.join(LOG_SAVE_DIR, 'train-{:s}.log'.format(time_str)))
 
@@ -93,17 +86,12 @@ def train_validate_test(arguments: ArgumentParser):
     logger.info("{}:\t{}".format("SATURATION".ljust(LJUST_VALUES), SATURATION))
     logger.info("{}:\t{}".format("HUE".ljust(LJUST_VALUES), HUE))
 
-    # train_transform = transforms.Compose([
-    #     transforms.Resize(RESIZE),
-    #     transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
-    #     transforms.RandomHorizontalFlip(),
-    #     transforms.ToTensor(),
-    #     transforms.Normalize(MEAN, STD)
-    # ])
-
     train_transform = transforms.Compose([
         transforms.Resize(RESIZE),
-        transforms.ToTensor()
+        transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(MEAN, STD)
     ])
 
     test_transform = transforms.Compose([
@@ -178,7 +166,7 @@ def train_validate_test(arguments: ArgumentParser):
 
         model.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for i, (images, labels) in enumerate(val_loader):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = model(images)
@@ -256,7 +244,7 @@ def train_validate_test(arguments: ArgumentParser):
 
     model.eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for images, labels in test_loader:
             images, labels = images.to(DEVICE), labels.to(DEVICE)
             outputs = model(images)
@@ -294,7 +282,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--device", type=str, default="mps", choices=["cpu", "cuda", "mps"], help="Device")
 
-    argparser.add_argument("--batch-size", type=int, default=64, help="Batch size")
+    argparser.add_argument("--batch-size", type=int, default=32, help="Batch size")
 
     argparser.add_argument("--learning-rate", type=float, default=0.00001, help="Learning Rate")
 
