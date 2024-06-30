@@ -12,6 +12,11 @@ from torchinfo import Verbosity, summary
 from datetime import datetime
 from utils import *
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard.writer import SummaryWriter
+from torchvision.utils import make_grid
+import shutil
+import numpy as np
+from pathlib import Path
 
 
 def train_validate_test(arguments: ArgumentParser):
@@ -29,6 +34,8 @@ def train_validate_test(arguments: ArgumentParser):
     LOG_SAVE_DIR = args.log_path
     IMG_SAVE_DIR = args.img_path
     MODEL_SAVE_DIR = args.model_path
+    SAVE_MODEL = args.save_model
+    TENSORBOARD_LOGS_DIR = args.tensorboard_logs
     LJUST_VALUES = 20
 
     time_str = datetime.strftime(datetime.now(), '%m%d-%H%M%S')
@@ -37,14 +44,12 @@ def train_validate_test(arguments: ArgumentParser):
 
     torch.manual_seed(seed=42)
 
-    if not os.path.exists(LOG_SAVE_DIR):
-        os.makedirs(LOG_SAVE_DIR)
-
-    if not os.path.exists(IMG_SAVE_DIR):
-        os.makedirs(IMG_SAVE_DIR)
-
-    if not os.path.exists(MODEL_SAVE_DIR):
-        os.makedirs(MODEL_SAVE_DIR)
+    Path(LOG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
+    Path(IMG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
+    if os.path.exists(TENSORBOARD_LOGS_DIR):
+        shutil.rmtree(Path(TENSORBOARD_LOGS_DIR))
+    Path(TENSORBOARD_LOGS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(MODEL_SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
     logger = get_logger(os.path.join(LOG_SAVE_DIR, 'train-{:s}.log'.format(time_str)))
 
@@ -65,10 +70,25 @@ def train_validate_test(arguments: ArgumentParser):
     logger.info("{}:\t{}".format("MEAN".ljust(LJUST_VALUES), MEAN))
     logger.info("{}:\t{}".format("STD".ljust(LJUST_VALUES), STD))
 
+    random_numbers = np.random.rand(4)
+
+    scaled_numbers = random_numbers / np.sum(random_numbers) * 0.5
+
+    BRIGHTNESS, CONTRAST, SATURATION, HUE = scaled_numbers
+
+    BRIGHTNESS = round(BRIGHTNESS, 2)
+    CONTRAST = round(CONTRAST, 2)
+    SATURATION = round(SATURATION, 2)
+    HUE = round(HUE, 2)
+
+    logger.info("{}:\t{}".format("BRIGHTNESS".ljust(LJUST_VALUES), BRIGHTNESS))
+    logger.info("{}:\t{}".format("CONTRAST".ljust(LJUST_VALUES), CONTRAST))
+    logger.info("{}:\t{}".format("SATURATION".ljust(LJUST_VALUES), SATURATION))
+    logger.info("{}:\t{}".format("HUE".ljust(LJUST_VALUES), HUE))
+
     train_transform = transforms.Compose([
         transforms.Resize(RESIZE),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-        transforms.CenterCrop([192, 192]),
+        transforms.ColorJitter(brightness=BRIGHTNESS, contrast=CONTRAST, saturation=SATURATION, hue=HUE),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(MEAN, STD)
@@ -85,11 +105,15 @@ def train_validate_test(arguments: ArgumentParser):
 
     logger.info("{}:\t{}".format("Classes".ljust(LJUST_VALUES), dataset.class_to_idx))
 
-    train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.7, 0.3))
+    train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.6, 0.4))
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    logger.info("{}:\t{}".format("Train Loader length".ljust(LJUST_VALUES), len(train_loader)))
+    logger.info("{}:\t{}".format("Val Loader length".ljust(LJUST_VALUES), len(val_loader)))
+    logger.info("{}:\t{}".format("Test Loader length".ljust(LJUST_VALUES), len(test_loader)))
 
     model.to(DEVICE)
 
@@ -107,13 +131,16 @@ def train_validate_test(arguments: ArgumentParser):
     val_losses = []
     last_lrs = []
 
+    writer = SummaryWriter(TENSORBOARD_LOGS_DIR, comment="Resnet50")
+
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0.0
         correct = 0
         total = 0
 
-        for images, labels in train_loader:
+        for i, (images, labels) in enumerate(train_loader):
+
             images, labels = images.to(DEVICE), labels.to(DEVICE)
 
             optimizer.zero_grad()
@@ -129,14 +156,18 @@ def train_validate_test(arguments: ArgumentParser):
 
             total_loss += loss.item()
 
+            grid = make_grid(images)
+            writer.add_image(f'Training_Epoch_{epoch+1}', grid, i)
+            writer.close()
+
         correct_val = 0
         total_val = 0
         total_loss_val = 0.0
 
         model.eval()
 
-        with torch.no_grad():
-            for images, labels in val_loader:
+        with torch.inference_mode():
+            for i, (images, labels) in enumerate(val_loader):
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
@@ -145,6 +176,10 @@ def train_validate_test(arguments: ArgumentParser):
                 correct_val += (predicted == labels).sum().item()
 
                 total_loss_val += loss.item()
+
+                grid = make_grid(images)
+                writer.add_image(f'Val_Epoch_{epoch+1}', grid, i)
+                writer.close()
 
         scheduler.step()
 
@@ -159,6 +194,14 @@ def train_validate_test(arguments: ArgumentParser):
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         last_lrs.append(last_lr)
+
+        writer.add_scalar('Loss/Train', train_loss, epoch)
+        writer.add_scalar('Loss/Val', val_loss, epoch)
+        writer.add_scalar('Accuracy/Train', train_accuracy, epoch)
+        writer.add_scalar('Accuracy/Val', val_accuracy, epoch)
+        writer.add_scalar('Learning Rate', last_lr, epoch)
+
+        writer.close()
 
         logger.info(
             "{}:\tTrain Accuracy: {}% - Val Accuracy: {}% - Train loss: {} - Val loss: {} - Last LR: {}"
@@ -201,7 +244,7 @@ def train_validate_test(arguments: ArgumentParser):
 
     model.eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for images, labels in test_loader:
             images, labels = images.to(DEVICE), labels.to(DEVICE)
             outputs = model(images)
@@ -211,6 +254,10 @@ def train_validate_test(arguments: ArgumentParser):
             correct_test += (predicted == labels).sum().item()
 
             total_loss_test += loss.item()
+
+            grid = make_grid(images)
+            writer.add_image(f'Test_Epoch', grid)
+            writer.close()
 
     logger.info("{}:\t{}".format(f"Test".ljust(LJUST_VALUES), f"Test Accuracy - {100*correct_test/total_test:.2f}% - Test Loss = {total_loss_test/len(test_loader):.3f}"))
 
@@ -222,9 +269,11 @@ def train_validate_test(arguments: ArgumentParser):
 
     logger.info("{}:\t{}".format("Time Difference".ljust(LJUST_VALUES), delta))
 
-    torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
-
-    logger.info("Saving the Model")
+    if SAVE_MODEL:
+        torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
+        logger.info("Saving the Model")
+    else:
+        logger.info("Not saving the Model, Please set the --save-model flag")
 
 
 if __name__ == "__main__":
@@ -233,7 +282,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--device", type=str, default="mps", choices=["cpu", "cuda", "mps"], help="Device")
 
-    argparser.add_argument("--batch-size", type=int, default=64, help="Batch size")
+    argparser.add_argument("--batch-size", type=int, default=32, help="Batch size")
 
     argparser.add_argument("--learning-rate", type=float, default=0.00001, help="Learning Rate")
 
@@ -250,6 +299,10 @@ if __name__ == "__main__":
     argparser.add_argument("--img-path", type=str, default=os.getcwd()+"/images", help="Image Path")
 
     argparser.add_argument("--model-path", type=str, default=os.getcwd()+"/models", help="Model Path")
+
+    argparser.add_argument("--tensorboard-logs", type=str, default=os.getcwd()+"/tensorboard_logs", help="Tensorboard logs Path")
+
+    argparser.add_argument("--save-model", type=bool, default=False, help="Save Model")
 
     argparser.add_argument("--out-features", type=int, default=3, help="Output Features")
 
