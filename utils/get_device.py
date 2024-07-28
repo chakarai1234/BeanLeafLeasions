@@ -1,5 +1,4 @@
 import torch
-from torch.nn import Module
 
 
 def get_device(device: str = "cpu") -> torch.device:

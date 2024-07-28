@@ -1,3 +1,4 @@
+from math import log
 import os
 import torch
 from torchvision.datasets import ImageFolder
@@ -5,7 +6,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split
 import torchvision.models as models
 from torch.nn import CrossEntropyLoss
-from torch.optim import Adam
+from torch.optim.adam import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from argparse import ArgumentParser, Namespace
 from torchinfo import Verbosity, summary

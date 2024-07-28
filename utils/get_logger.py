@@ -1,6 +1,7 @@
 from argparse import Namespace
 import logging
 from logging import Logger
+from typing import Union
 
 
 def get_logger(log_file: str) -> Logger:
@@ -28,3 +29,7 @@ def get_logger(log_file: str) -> Logger:
 def print_config(config: Namespace, logger: Logger, justify: int):
     for k, v in vars(config).items():
         logger.info("{}:\t{}".format(k.ljust(justify), v))
+
+
+def log(dicts: dict[str, Union[str, int, float]], logger: Logger, justify: int):
+    logger.info("{}:\t{}".format(list(dicts.keys())[0].ljust(justify), list(dicts.values())[0]))
