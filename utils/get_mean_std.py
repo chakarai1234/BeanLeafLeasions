@@ -1,7 +1,8 @@
 import torch
+from torchvision.datasets import ImageFolder
 
 
-def get_mean_std(dataset):
+def get_mean_std(dataset: ImageFolder) -> list[list[float]]:
     mean = [0.0, 0.0, 0.0]
     std = [0.0, 0.0, 0.0]
 
@@ -22,4 +23,4 @@ def get_mean_std(dataset):
     mean = [round(value, 1) for value in mean]
     std = [round(value, 1) for value in std]
 
-    return mean, std
+    return [mean, std]
