@@ -1,4 +1,5 @@
 import os
+from time import sleep
 import torch
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
@@ -6,6 +7,7 @@ from torch.utils.data import DataLoader, random_split, Dataset
 import torchvision.models as models
 from torch.nn import CrossEntropyLoss
 from torch.optim.adam import Adam
+from torch.optim.sgd import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from argparse import ArgumentParser, Namespace
 from torchinfo import Verbosity, summary
@@ -17,6 +19,8 @@ from torchvision.utils import make_grid
 import shutil
 import numpy as np
 from pathlib import Path
+
+from utils.tensorboard_process import start_tensorboard, stop_tensorboard
 
 
 def train_validate_test(arguments: ArgumentParser):
@@ -42,6 +46,8 @@ def train_validate_test(arguments: ArgumentParser):
 
     IMG_SAVE_DIR = IMG_SAVE_DIR+"/train-{:s}".format(time_str)
 
+    MODEL_SAVE_FILE = MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str)
+
     torch.manual_seed(seed=42)
 
     Path(LOG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
@@ -54,247 +60,269 @@ def train_validate_test(arguments: ArgumentParser):
     # os.path.join(LOG_SAVE_DIR, 'train-{:s}.log'.format(time_str))
     logger = get_logger(logger_name="Bean Leaf Lesions")
 
-    DEVICE = get_device(args.device)
+    tensorboard = start_tensorboard(TENSORBOARD_LOGS_DIR, logger, "Bean Leaf Lesion", LJUST_VALUES)
 
-    model = get_model(models.resnet50, models.ResNet50_Weights.DEFAULT, OUT_FEATURES)
+    sleep(2)
 
-    model_details = summary(model, depth=20, batch_dim=BATCH_SIZE, device=DEVICE, verbose=Verbosity.QUIET)
+    try:
 
-    logger.info(f"\n{model_details}\n")
+        DEVICE = get_device(args.device)
 
-    log(args, logger, LJUST_VALUES)
+        model = get_model(models.resnet50, models.ResNet50_Weights.DEFAULT, OUT_FEATURES, False)
 
-    total_dataset = ImageFolder(args.train_path, transform=transforms.ToTensor())
+        model_details = summary(model, depth=20, batch_dim=BATCH_SIZE, device=DEVICE, verbose=Verbosity.QUIET)
 
-    mean, std = get_mean_std(total_dataset)
+        log(model_details, logger, 0)
 
-    logger.info("{}:\t{}".format("mean".ljust(LJUST_VALUES), mean))
-    logger.info("{}:\t{}".format("std".ljust(LJUST_VALUES), std))
+        log(args, logger, LJUST_VALUES)
 
-    random_numbers = np.random.rand(4)
+        total_dataset = ImageFolder(args.train_path, transform=transforms.ToTensor())
 
-    scaled_numbers = random_numbers / np.sum(random_numbers) * 0.5
+        mean, std = get_mean_std(total_dataset)
 
-    brightness, contrast, saturation, hue = scaled_numbers
+        mean_std_values = {"mean": mean, "std": std}
 
-    brightness = round(brightness, 2)
-    contrast = round(contrast, 2)
-    saturation = round(saturation, 2)
-    hue = round(hue, 2)
+        log(mean_std_values, logger, LJUST_VALUES)
 
-    logger.info("{}:\t{}".format("brightness".ljust(LJUST_VALUES), brightness))
-    logger.info("{}:\t{}".format("contrast".ljust(LJUST_VALUES), contrast))
-    logger.info("{}:\t{}".format("saturation".ljust(LJUST_VALUES), saturation))
-    logger.info("{}:\t{}".format("hue".ljust(LJUST_VALUES), hue))
+        random_numbers = np.random.rand(4)
 
-    train_transform = transforms.Compose([
-        transforms.Resize(RESIZE),
-        transforms.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std)
-    ])
+        scaled_numbers = random_numbers / np.sum(random_numbers) * 0.5
 
-    test_transform = transforms.Compose([
-        transforms.Resize(RESIZE),
-        transforms.ToTensor(),
-    ])
+        brightness, contrast, saturation, hue = scaled_numbers
 
-    dataset = ImageFolder(args.train_path)
-    test_dataset = ImageFolder(args.test_path, transform=test_transform)
+        brightness = 0  # round(brightness, 2)
+        contrast = 0  # round(contrast, 2)
+        saturation = 0  # round(saturation, 2)
+        hue = 0  # round(hue, 2)
 
-    logger.info("{}:\t{}".format("Classes".ljust(LJUST_VALUES), dataset.class_to_idx))
+        logger.info("{}:\t{}".format("brightness".ljust(LJUST_VALUES), brightness))
+        logger.info("{}:\t{}".format("contrast".ljust(LJUST_VALUES), contrast))
+        logger.info("{}:\t{}".format("saturation".ljust(LJUST_VALUES), saturation))
+        logger.info("{}:\t{}".format("hue".ljust(LJUST_VALUES), hue))
 
-    # train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.7, 0.3))
+        train_transform = transforms.Compose([
+            transforms.Resize(RESIZE),
+            # transforms.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            # transforms.Normalize(mean, std)
+        ])
 
-    train_size = int(0.7 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+        test_transform = transforms.Compose([
+            transforms.Resize(RESIZE),
+            transforms.ToTensor(),
+        ])
 
-    class CustomDataset(Dataset):
-        def __init__(self, subset, transform=None):
-            self.subset = subset
-            self.transform = transform
+        dataset = ImageFolder(args.train_path)
+        test_dataset = ImageFolder(args.test_path, transform=test_transform)
 
-        def __len__(self):
-            return len(self.subset)
+        logger.info("{}:\t{}".format("Classes".ljust(LJUST_VALUES), dataset.class_to_idx))
 
-        def __getitem__(self, idx):
-            image, label = self.subset[idx]
-            if self.transform:
-                image = self.transform(image)
-            return image, label
+        # train_dataset, val_dataset = random_split(dataset=dataset, lengths=(0.7, 0.3))
 
-    train_dataset = CustomDataset(train_dataset, transform=train_transform)
-    val_dataset = CustomDataset(val_dataset, transform=test_transform)
+        train_size = int(0.7 * len(dataset))
+        val_size = len(dataset) - train_size
+        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+        class CustomDataset(Dataset):
+            def __init__(self, subset, transform=None):
+                self.subset = subset
+                self.transform = transform
 
-    logger.info("{}:\t{}".format("Train Loader length".ljust(LJUST_VALUES), len(train_loader)))
-    logger.info("{}:\t{}".format("Val Loader length".ljust(LJUST_VALUES), len(val_loader)))
-    logger.info("{}:\t{}".format("Test Loader length".ljust(LJUST_VALUES), len(test_loader)))
+            def __len__(self):
+                return len(self.subset)
 
-    model.to(DEVICE)
+            def __getitem__(self, idx):
+                image, label = self.subset[idx]
+                if self.transform:
+                    image = self.transform(image)
+                return image, label
 
-    criterion = CrossEntropyLoss().to(DEVICE)
-    optimizer = Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=EPOCHS)
+        train_dataset = CustomDataset(train_dataset, transform=train_transform)
+        val_dataset = CustomDataset(val_dataset, transform=test_transform)
 
-    start_time = str(datetime.now().strftime("%H:%M:%S"))
-    t1 = datetime.strptime(start_time, "%H:%M:%S")
-    logger.info("{}:\t{}".format("Start time".ljust(LJUST_VALUES), t1.time()))
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-    train_accuracies = []
-    val_accuracies = []
-    train_losses = []
-    val_losses = []
-    last_lrs = []
+        logger.info("{}:\t{}".format("Train Loader length".ljust(LJUST_VALUES), len(train_loader)))
+        logger.info("{}:\t{}".format("Val Loader length".ljust(LJUST_VALUES), len(val_loader)))
+        logger.info("{}:\t{}".format("Test Loader length".ljust(LJUST_VALUES), len(test_loader)))
 
-    # writer = SummaryWriter(TENSORBOARD_LOGS_DIR, comment="Resnet50")
+        model.to(DEVICE)
 
-    # for epoch in range(EPOCHS):
-    #     model.train()
-    #     total_loss = 0.0
-    #     correct = 0
-    #     total = 0
+        criterion = CrossEntropyLoss().to(DEVICE)
+        optimizer = SGD(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=EPOCHS)
 
-    #     for i, (images, labels) in enumerate(train_loader):
+        start_time = str(datetime.now().strftime("%H:%M:%S"))
+        t1 = datetime.strptime(start_time, "%H:%M:%S")
+        logger.info("{}:\t{}".format("Start time".ljust(LJUST_VALUES), t1.time()))
 
-    #         images, labels = images.to(DEVICE), labels.to(DEVICE)
+        train_accuracies = []
+        val_accuracies = []
+        train_losses = []
+        val_losses = []
+        last_lrs = []
 
-    #         optimizer.zero_grad()
-    #         outputs = model(images)
-    #         _, predicted = torch.max(outputs, 1)
-    #         loss = criterion(outputs, labels)
+        writer = SummaryWriter(TENSORBOARD_LOGS_DIR, comment="Resnet50")
 
-    #         loss.backward()
-    #         optimizer.step()
+        for epoch in range(EPOCHS):
+            model.train()
+            total_loss = 0.0
+            correct = 0
+            total = 0
+            least_val_loss = 10
 
-    #         correct += (predicted == labels).sum().item()
-    #         total += labels.size(0)
+            for i, (images, labels) in enumerate(train_loader):
 
-    #         total_loss += loss.item()
+                images, labels = images.to(DEVICE), labels.to(DEVICE)
 
-    #         grid = make_grid(images)
-    #         writer.add_image(f'Training_Epoch_{epoch+1}', grid, i)
-    #         writer.close()
+                optimizer.zero_grad()
+                outputs = model(images)
+                _, predicted = torch.max(outputs, 1)
+                loss = criterion(outputs, labels)
 
-    #     correct_val = 0
-    #     total_val = 0
-    #     total_loss_val = 0.0
+                loss.backward()
+                optimizer.step()
 
-    #     model.eval()
+                correct += (predicted == labels).sum().item()
+                total += labels.size(0)
 
-    #     with torch.inference_mode():
-    #         for i, (images, labels) in enumerate(val_loader):
-    #             images, labels = images.to(DEVICE), labels.to(DEVICE)
-    #             outputs = model(images)
-    #             loss = criterion(outputs, labels)
-    #             _, predicted = torch.max(outputs, 1)
-    #             total_val += labels.size(0)
-    #             correct_val += (predicted == labels).sum().item()
+                total_loss += loss.item()
 
-    #             total_loss_val += loss.item()
+                grid = make_grid(images)
+                writer.add_image(f'Training_Epoch_{epoch+1}', grid, i)
+                writer.close()
 
-    #             grid = make_grid(images)
-    #             writer.add_image(f'Val_Epoch_{epoch+1}', grid, i)
-    #             writer.close()
+            correct_val = 0
+            total_val = 0
+            total_loss_val = 0.0
 
-    #     scheduler.step()
+            model.eval()
 
-    #     train_accuracy = round(100*correct/total, 2)
-    #     val_accuracy = round(100*correct_val/total_val, 2)
-    #     train_loss = round(total_loss/len(train_loader), 2)
-    #     val_loss = round(total_loss_val/len(val_loader), 2)
-    #     last_lr = scheduler.get_last_lr()[0]
+            with torch.inference_mode():
+                for i, (images, labels) in enumerate(val_loader):
+                    images, labels = images.to(DEVICE), labels.to(DEVICE)
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+                    _, predicted = torch.max(outputs, 1)
+                    total_val += labels.size(0)
+                    correct_val += (predicted == labels).sum().item()
 
-    #     train_accuracies.append(train_accuracy)
-    #     val_accuracies.append(val_accuracy)
-    #     train_losses.append(train_loss)
-    #     val_losses.append(val_loss)
-    #     last_lrs.append(last_lr)
+                    total_loss_val += loss.item()
 
-    #     writer.add_scalar('Loss/Train', train_loss, epoch)
-    #     writer.add_scalar('Loss/Val', val_loss, epoch)
-    #     writer.add_scalar('Accuracy/Train', train_accuracy, epoch)
-    #     writer.add_scalar('Accuracy/Val', val_accuracy, epoch)
-    #     writer.add_scalar('Learning Rate', last_lr, epoch)
+                    grid = make_grid(images)
+                    writer.add_image(f'Val_Epoch_{epoch+1}', grid, i)
+                    writer.close()
 
-    #     writer.close()
+            scheduler.step()
 
-    #     logger.info(
-    #         "{}:\tTrain Accuracy: {}% - Val Accuracy: {}% - Train loss: {} - Val loss: {} - Last LR: {}"
-    #         .format(f"Epoch {epoch+1}".ljust(LJUST_VALUES),
-    #                 f"{train_accuracy}",
-    #                 f"{val_accuracy}",
-    #                 f"{train_loss}",
-    #                 f"{val_loss}",
-    #                 f"{last_lr}"))
+            train_accuracy = round(100*correct/total, 2)
+            val_accuracy = round(100*correct_val/total_val, 2)
+            train_loss = round(total_loss/len(train_loader), 2)
+            val_loss = round(total_loss_val/len(val_loader), 2)
+            last_lr = scheduler.get_last_lr()[0]
 
-    # logger.info("{}:\t{}".format("Train Accuracies".ljust(LJUST_VALUES), train_accuracies))
-    # logger.info("{}:\t{}".format("Val Accuracies".ljust(LJUST_VALUES), val_accuracies))
-    # logger.info("{}:\t{}".format("Train Losses".ljust(LJUST_VALUES), train_losses))
-    # logger.info("{}:\t{}".format("Val Losses".ljust(LJUST_VALUES), val_losses))
-    # logger.info("{}:\t{}".format("Last Learning Rates".ljust(LJUST_VALUES), last_lrs))
+            if val_loss < least_val_loss:
+                least_val_loss = val_loss
+                if SAVE_MODEL:
+                    torch.save(model, MODEL_SAVE_FILE)
+                    log({"Saving the model": f"Val Loss: {val_loss}"}, logger, LJUST_VALUES)
+                else:
+                    log({"Info": "Not saving the Model, Please set the --save-model flag"}, logger, LJUST_VALUES)
 
-    # plt.plot(range(EPOCHS), train_accuracies, label="Train Accuracies")
-    # plt.plot(range(EPOCHS), val_accuracies, label="Val Accuracies")
-    # plt.legend()
-    # plt.savefig(IMG_SAVE_DIR+"/accuracies-plot.png")
-    # logger.info("Saving the accuracies plot")
-    # plt.close()
+            train_accuracies.append(train_accuracy)
+            val_accuracies.append(val_accuracy)
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+            last_lrs.append(last_lr)
 
-    # plt.plot(range(EPOCHS), train_losses, label="Train Losses")
-    # plt.plot(range(EPOCHS), val_losses, label="Val Losses")
-    # plt.legend()
-    # plt.savefig(IMG_SAVE_DIR+"/losses-plot.png")
-    # logger.info("Saving the losses plot")
-    # plt.close()
+            writer.add_scalar('Loss/Train', train_loss, epoch)
+            writer.add_scalar('Loss/Val', val_loss, epoch)
+            writer.add_scalar('Accuracy/Train', train_accuracy, epoch)
+            writer.add_scalar('Accuracy/Val', val_accuracy, epoch)
+            writer.add_scalar('Learning Rate', last_lr, epoch)
 
-    # plt.plot(range(EPOCHS), last_lrs, label="Learning Rates")
-    # plt.savefig(IMG_SAVE_DIR+"/learning-rate-plot.png")
-    # logger.info("Saving the learning rate plot")
-    # plt.legend()
-    # plt.close()
+            writer.close()
 
-    # correct_test = 0
-    # total_test = 0
-    # total_loss_test = 0.0
+            logger.info(
+                "{}:\tTrain Accuracy: {}% - Val Accuracy: {}% - Train loss: {} - Val loss: {} - Last LR: {}"
+                .format(f"Epoch {epoch+1}".ljust(LJUST_VALUES),
+                        f"{train_accuracy}",
+                        f"{val_accuracy}",
+                        f"{train_loss}",
+                        f"{val_loss}",
+                        f"{last_lr}"))
 
-    # model.eval()
+        logger.info("{}:\t{}".format("Train Accuracies".ljust(LJUST_VALUES), train_accuracies))
+        logger.info("{}:\t{}".format("Val Accuracies".ljust(LJUST_VALUES), val_accuracies))
+        logger.info("{}:\t{}".format("Train Losses".ljust(LJUST_VALUES), train_losses))
+        logger.info("{}:\t{}".format("Val Losses".ljust(LJUST_VALUES), val_losses))
+        logger.info("{}:\t{}".format("Last Learning Rates".ljust(LJUST_VALUES), last_lrs))
 
-    # with torch.inference_mode():
-    #     for images, labels in test_loader:
-    #         images, labels = images.to(DEVICE), labels.to(DEVICE)
-    #         outputs = model(images)
-    #         loss = criterion(outputs, labels)
-    #         _, predicted = torch.max(outputs, 1)
-    #         total_test += labels.size(0)
-    #         correct_test += (predicted == labels).sum().item()
+        plt.plot(range(EPOCHS), train_accuracies, label="Train Accuracies")
+        plt.plot(range(EPOCHS), val_accuracies, label="Val Accuracies")
+        plt.legend()
+        plt.savefig(IMG_SAVE_DIR+"/accuracies-plot.png")
+        logger.info("Saving the accuracies plot")
+        plt.close()
 
-    #         total_loss_test += loss.item()
+        plt.plot(range(EPOCHS), train_losses, label="Train Losses")
+        plt.plot(range(EPOCHS), val_losses, label="Val Losses")
+        plt.legend()
+        plt.savefig(IMG_SAVE_DIR+"/losses-plot.png")
+        logger.info("Saving the losses plot")
+        plt.close()
 
-    #         grid = make_grid(images)
-    #         writer.add_image(f'Test_Epoch', grid)
-    #         writer.close()
+        plt.plot(range(EPOCHS), last_lrs, label="Learning Rates")
+        plt.savefig(IMG_SAVE_DIR+"/learning-rate-plot.png")
+        logger.info("Saving the learning rate plot")
+        plt.legend()
+        plt.close()
 
-    # logger.info("{}:\t{}".format(f"Test".ljust(LJUST_VALUES), f"Test Accuracy - {100*correct_test/total_test:.2f}% - Test Loss = {total_loss_test/len(test_loader):.3f}"))
+        correct_test = 0
+        total_test = 0
+        total_loss_test = 0.0
 
-    # end = str(datetime.now().strftime("%H:%M:%S"))
-    # t2 = datetime.strptime(end, "%H:%M:%S")
-    # logger.info("{}:\t{}".format("End time".ljust(LJUST_VALUES), t2.time()))
+        model.eval()
 
-    # delta = t2 - t1
+        with torch.inference_mode():
+            for images, labels in test_loader:
+                images, labels = images.to(DEVICE), labels.to(DEVICE)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                _, predicted = torch.max(outputs, 1)
+                total_test += labels.size(0)
+                correct_test += (predicted == labels).sum().item()
 
-    # logger.info("{}:\t{}".format("Time Difference".ljust(LJUST_VALUES), delta))
+                total_loss_test += loss.item()
 
-    # if SAVE_MODEL:
-    #     torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
-    #     logger.info("Saving the Model")
-    # else:
-    #     logger.info("Not saving the Model, Please set the --save-model flag")
+                grid = make_grid(images)
+                writer.add_image(f'Test_Epoch', grid)
+                writer.close()
+
+        logger.info("{}:\t{}".format(f"Test".ljust(LJUST_VALUES), f"Test Accuracy - {100*correct_test/total_test:.2f}% - Test Loss = {total_loss_test/len(test_loader):.3f}"))
+
+        end = str(datetime.now().strftime("%H:%M:%S"))
+        t2 = datetime.strptime(end, "%H:%M:%S")
+        logger.info("{}:\t{}".format("End time".ljust(LJUST_VALUES), t2.time()))
+
+        delta = t2 - t1
+
+        logger.info("{}:\t{}".format("Time Difference".ljust(LJUST_VALUES), delta))
+
+        # if SAVE_MODEL:
+        #     torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
+        #     logger.info("Saving the Model")
+        # else:
+        #     logger.info("Not saving the Model, Please set the --save-model flag")
+
+    except Exception as e:
+        log(e, logger, LJUST_VALUES)
+    finally:
+        if tensorboard:
+            stop_tensorboard(tensorboard, logger, LJUST_VALUES)
 
 
 if __name__ == "__main__":
@@ -305,7 +333,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--batch-size", type=int, default=32, help="Batch size")
 
-    argparser.add_argument("--learning-rate", type=float, default=0.00001, help="Learning Rate")
+    argparser.add_argument("--learning-rate", type=float, default=0.01, help="Learning Rate")
 
     argparser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight Decay")
 
@@ -323,7 +351,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--tensorboard-logs", type=str, default=os.getcwd()+"/tensorboard_logs", help="Tensorboard logs Path")
 
-    argparser.add_argument("--save-model", type=bool, default=False, help="Save Model")
+    argparser.add_argument("--save-model", type=bool, default=True, help="Save Model")
 
     argparser.add_argument("--out-features", type=int, default=3, help="Output Features")
 
