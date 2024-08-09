@@ -8,7 +8,7 @@ from torchinfo import ModelStatistics
 def get_logger(logger_name: str, log_file: Union[str, None] = None) -> Logger:
     logger = logging.getLogger(logger_name)
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s", "%Y-%m-%d %I:%M:%S%p")
+        "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s", "%Y-%m-%d %I:%M:%S%p")
 
     logger.setLevel(logging.DEBUG)
 
@@ -34,7 +34,7 @@ def get_logger(logger_name: str, log_file: Union[str, None] = None) -> Logger:
     return logger
 
 
-def log(values: Union[Namespace, Mapping[str, Union[str, int, float, List[str], List[int], List[float]]], List[Mapping[str, Union[str, int, float, List[str], List[int], List[float]]]], ModelStatistics, Exception],
+def log(values: Union[Namespace, ModelStatistics, Exception, Mapping[str, Union[str, int, float, List[str], List[int], List[float]]], List[Mapping[str, Union[str, int, float, List[str], List[int], List[float]]]]],
         logger: Logger, justify: int):
 
     if isinstance(values, Namespace):
@@ -51,4 +51,4 @@ def log(values: Union[Namespace, Mapping[str, Union[str, int, float, List[str], 
     elif isinstance(values, ModelStatistics):
         logger.info(f"\n{values}\n")
     elif isinstance(values, Exception):
-        logger.info("{}:\t{}".format("Exception".ljust(justify), str(values)))
+        logger.info("{}:\t{}".format("Exception".ljust(justify), repr(values)))

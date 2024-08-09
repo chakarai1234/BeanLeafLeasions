@@ -3,7 +3,7 @@ from torchvision.models._api import WeightsEnum
 from typing import Union
 
 
-def get_model(pretrained_model, model_weights: Union[WeightsEnum, None] = None, out_features: int = 0, freeze_until_custom_layer: bool = True):
+def get_model(pretrained_model, model_weights: Union[WeightsEnum,str, None] = None, out_features: int = 0, freeze_until_custom_layer: bool = True):
 
     model = pretrained_model(weights=model_weights)
 

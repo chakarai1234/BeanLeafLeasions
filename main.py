@@ -20,10 +20,8 @@ import shutil
 import numpy as np
 from pathlib import Path
 
-from utils.tensorboard_process import start_tensorboard, stop_tensorboard
 
-
-def train_validate_test(arguments: ArgumentParser):
+def train_validate_test(arguments: ArgumentParser) -> None:
 
     args: Namespace = arguments.parse_args()
 
@@ -55,6 +53,8 @@ def train_validate_test(arguments: ArgumentParser):
     if os.path.exists(TENSORBOARD_LOGS_DIR):
         shutil.rmtree(Path(TENSORBOARD_LOGS_DIR))
     Path(TENSORBOARD_LOGS_DIR).mkdir(parents=True, exist_ok=True)
+    if os.path.exists(MODEL_SAVE_DIR):
+        shutil.rmtree(Path(MODEL_SAVE_DIR))
     Path(MODEL_SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
     # os.path.join(LOG_SAVE_DIR, 'train-{:s}.log'.format(time_str))
@@ -62,7 +62,7 @@ def train_validate_test(arguments: ArgumentParser):
 
     tensorboard = start_tensorboard(TENSORBOARD_LOGS_DIR, logger, "Bean Leaf Lesion", LJUST_VALUES)
 
-    sleep(2)
+    sleep(5)
 
     try:
 
@@ -90,10 +90,10 @@ def train_validate_test(arguments: ArgumentParser):
 
         brightness, contrast, saturation, hue = scaled_numbers
 
-        brightness = 0  # round(brightness, 2)
-        contrast = 0  # round(contrast, 2)
-        saturation = 0  # round(saturation, 2)
-        hue = 0  # round(hue, 2)
+        brightness = round(brightness, 2)
+        contrast = round(contrast, 2)
+        saturation = round(saturation, 2)
+        hue = round(hue, 2)
 
         logger.info("{}:\t{}".format("brightness".ljust(LJUST_VALUES), brightness))
         logger.info("{}:\t{}".format("contrast".ljust(LJUST_VALUES), contrast))
@@ -102,8 +102,10 @@ def train_validate_test(arguments: ArgumentParser):
 
         train_transform = transforms.Compose([
             transforms.Resize(RESIZE),
-            # transforms.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue),
+            transforms.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue),
             transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.GaussianBlur(kernel_size=3),
             transforms.ToTensor(),
             # transforms.Normalize(mean, std)
         ])
@@ -227,7 +229,7 @@ def train_validate_test(arguments: ArgumentParser):
             if val_loss < least_val_loss:
                 least_val_loss = val_loss
                 if SAVE_MODEL:
-                    torch.save(model, MODEL_SAVE_FILE)
+                    torch.save(model.state_dict(), MODEL_SAVE_FILE)
                     log({"Saving the model": f"Val Loss: {val_loss}"}, logger, LJUST_VALUES)
                 else:
                     log({"Info": "Not saving the Model, Please set the --save-model flag"}, logger, LJUST_VALUES)
@@ -285,7 +287,12 @@ def train_validate_test(arguments: ArgumentParser):
         total_test = 0
         total_loss_test = 0.0
 
-        model.eval()
+        if SAVE_MODEL:
+            model.load_state_dict(torch.load(MODEL_SAVE_FILE))
+            model.to(DEVICE)
+            model.eval()
+        else:
+            model.eval()
 
         with torch.inference_mode():
             for images, labels in test_loader:
@@ -312,12 +319,6 @@ def train_validate_test(arguments: ArgumentParser):
 
         logger.info("{}:\t{}".format("Time Difference".ljust(LJUST_VALUES), delta))
 
-        # if SAVE_MODEL:
-        #     torch.save(model, MODEL_SAVE_DIR+"/model-{:s}.pth".format(time_str))
-        #     logger.info("Saving the Model")
-        # else:
-        #     logger.info("Not saving the Model, Please set the --save-model flag")
-
     except Exception as e:
         log(e, logger, LJUST_VALUES)
     finally:
@@ -337,7 +338,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight Decay")
 
-    argparser.add_argument("--epochs", type=int, default=20, help="Epochs")
+    argparser.add_argument("--epochs", type=int, default=30, help="Epochs")
 
     argparser.add_argument("--train-path", type=str, default=os.getcwd()+"/Data/train", help="Train path")
 
